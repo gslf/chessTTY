@@ -14,8 +14,8 @@ bool engine_start(Engine *e, const char *path) {
     char line[4096];
     while (now_ms() - t0 < 10000) {
         if (engine_poll_line(e, line, sizeof line)) {
-            if (!strncmp(line, "id name ", 8))
-                snprintf(e->name, sizeof e->name, "%s", line + 8);
+            if (!strncmp(line, "id name ", 8))   /* explicit precision: the line can be far longer */
+                snprintf(e->name, sizeof e->name, "%.*s", (int)(sizeof e->name - 1), line + 8);
             if (!strcmp(line, "uciok")) { e->ok = true; return true; }
         } else msleep(5);
     }

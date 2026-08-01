@@ -152,7 +152,7 @@ static void score_str(const EngineLine *L, char *out, size_t n) {
 static void draw_player_line(App *a, int row, int side) {
     SB *b = &a->fb;
     Game *g = &a->game;
-    char nm[32];
+    char nm[sizeof g->tag_white];   /* holds the longest PGN name tag */
     if (a->mode == MODE_PLAY) {
         if (side == a->opp.side)
             snprintf(nm, sizeof nm, "Stockfish L%d", a->opp.difficulty);
@@ -321,7 +321,7 @@ static void draw_notation(App *a, int r0, int c0, int r1, int c1) {
             put_padded(b, "", iw);
             continue;
         }
-        char num[8];
+        char num[16];
         snprintf(num, sizeof num, "%3d.", g->start.fullmove + r);
         t_style_fg(b, CL_DIM, 0);
         sb_put(b, num);
@@ -407,7 +407,7 @@ static void draw_analysis(App *a, int r0, int c0, int r1, int c1) {
         sb_printf(b, "%d ", i + 1);
         char s2[16];
         score_str(L, s2, sizeof s2);
-        char left[16];
+        char left[24];
         snprintf(left, sizeof left, "%6s ", s2);
         t_style_fg(b, CL_TXT, A_BOLD);
         sb_put(b, left);
@@ -652,7 +652,7 @@ static void draw_picker(App *a) {
         t_moveto(b, 2 + i, 3);
         if (idx >= n) { t_reset(b); put_padded(b, "", a->tw - 4); continue; }
         const PgnRef *g = &a->plist->games[idx];
-        char line[256];
+        char line[400];   /* four PGN tags plus separators */
         snprintf(line, sizeof line, "%4d. %s — %s   %s   %s", idx + 1,
                  g->white, g->black, g->result, g->event);
         if (idx == a->pick_idx) {

@@ -10,6 +10,15 @@ static void set_err(char *err, size_t errn, const char *msg) {
     if (err && errn) snprintf(err, errn, "%s", msg);
 }
 
+/* Copies a tag value into a fixed-size field, truncating what does not fit:
+   a PGN value may legitimately be longer than the field that receives it. */
+static void field_set(char *dst, size_t n, const char *src) {
+    size_t k = strlen(src);
+    if (k >= n) k = n - 1;
+    memcpy(dst, src, k);
+    dst[k] = 0;
+}
+
 void pgn_list_free(PgnList *L) {
     if (!L) return;
     free(L->buf);
@@ -89,12 +98,12 @@ PgnList *pgn_scan_file(const char *path, char *err, size_t errn) {
             const char *nx = parse_tag(s, end, key, sizeof key, val, sizeof val);
             if (!nx) break;
             saw_tag = true;
-            if (!strcmp(key, "White")) snprintf(ref.white, sizeof ref.white, "%s", val);
-            else if (!strcmp(key, "Black")) snprintf(ref.black, sizeof ref.black, "%s", val);
-            else if (!strcmp(key, "Event")) snprintf(ref.event, sizeof ref.event, "%s", val);
-            else if (!strcmp(key, "Date")) snprintf(ref.date, sizeof ref.date, "%s", val);
-            else if (!strcmp(key, "Result")) snprintf(ref.result, sizeof ref.result, "%s", val);
-            else if (!strcmp(key, "FEN")) snprintf(ref.fen, sizeof ref.fen, "%s", val);
+            if (!strcmp(key, "White")) field_set(ref.white, sizeof ref.white, val);
+            else if (!strcmp(key, "Black")) field_set(ref.black, sizeof ref.black, val);
+            else if (!strcmp(key, "Event")) field_set(ref.event, sizeof ref.event, val);
+            else if (!strcmp(key, "Date")) field_set(ref.date, sizeof ref.date, val);
+            else if (!strcmp(key, "Result")) field_set(ref.result, sizeof ref.result, val);
+            else if (!strcmp(key, "FEN")) field_set(ref.fen, sizeof ref.fen, val);
             s = nx;
             while (s < end && isspace((unsigned char)*s)) s++;
         }

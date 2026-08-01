@@ -8,6 +8,9 @@ name: Release
 # Each job builds Stockfish for a portable baseline CPU, builds the TUI, runs
 # the self-tests and packages a ready-to-run archive; the last job attaches
 # everything to a GitHub release with checksums and generated notes.
+#
+# Unlike CI, these builds do not use -Werror: a warning introduced by a newer
+# compiler must never be what stops a release from going out.
 
 on:
   push:
@@ -42,7 +45,7 @@ jobs:
         run: make engine SF_ARCHS="${{ matrix.sf_archs }}"
 
       - name: Build ChessTUI
-        run: make tui CFLAGS="-O2 -Werror"
+        run: make tui
 
       - name: Self-tests
         run: make test
@@ -80,7 +83,7 @@ jobs:
           lipo -info engine/stockfish
 
       - name: Build ChessTUI (universal)
-        run: make tui CFLAGS="-O2 -Werror -arch arm64 -arch x86_64"
+        run: make tui CFLAGS="-O2 -arch arm64 -arch x86_64"
 
       - name: Self-tests
         run: make test
@@ -117,7 +120,7 @@ jobs:
         run: make engine SF_ARCHS="x86-64-sse41-popcnt x86-64"
 
       - name: Build ChessTUI
-        run: make tui CFLAGS="-O2 -Werror" LDFLAGS="-static"
+        run: make tui LDFLAGS="-static"
 
       - name: Self-tests
         run: make test

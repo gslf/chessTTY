@@ -333,8 +333,9 @@ static void enter_analyze(App *a, int idx) {
 }
 
 static void open_pgn(App *a, const char *path_in) {
-    /* clean up the path: quotes, spaces, leading ~ */
-    char path[600];
+    /* clean up the path: quotes, spaces, leading ~ (buffers sized like the
+       destination field, so that nothing here can silently truncate) */
+    char path[sizeof a->loaded_path];
     size_t n = 0;
     const char *s = path_in;
     while (*s == ' ' || *s == '"' || *s == '\'') s++;
@@ -342,7 +343,7 @@ static void open_pgn(App *a, const char *path_in) {
     while (n > 0 && (path[n-1] == ' ' || path[n-1] == '"' || path[n-1] == '\'')) n--;
     path[n] = 0;
     /* drop shell escapes (drag & drop: "\ " -> " ") */
-    char clean[600];
+    char clean[sizeof a->loaded_path];
     size_t cn = 0;
     for (size_t i = 0; i < n; i++) {
         if (path[i] == '\\' && i + 1 < n && path[i+1] == ' ') continue;
@@ -353,9 +354,10 @@ static void open_pgn(App *a, const char *path_in) {
     if (clean[0] == '~') {
         const char *home = getenv("HOME");
         if (home) {
-            char tmp[600];
-            snprintf(tmp, sizeof tmp, "%s%s", home, clean + 1);
-            strcpy(clean, tmp);
+            char tmp[sizeof a->loaded_path];
+            int w = snprintf(tmp, sizeof tmp, "%s%s", home, clean + 1);
+            /* keep the original if the expansion would not fit */
+            if (w > 0 && (size_t)w < sizeof tmp) memcpy(clean, tmp, (size_t)w + 1);
         }
     }
 #endif
