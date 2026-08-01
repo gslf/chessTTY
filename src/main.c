@@ -730,7 +730,23 @@ static int run_engine_test(const char *path) {
     printf("Engine: %s\n", a->engine_path);
     Engine e;
     if (!engine_start(&e, a->engine_path)) {
-        printf("ERROR: could not start the engine.\nRun `make engine` to build it.\n");
+        printf("ERROR: %s\n", file_exists(a->engine_path) ? "the engine is there but did not start."
+                                                          : "no engine at that path.");
+        if (e.proc.last_error) {
+#ifdef _WIN32
+            printf("  launch failed with error %d\n", e.proc.last_error);
+#else
+            printf("  launch failed: %s\n", strerror(e.proc.last_error));
+#endif
+            printf("  Run `make engine` to build it.\n");
+        } else {
+            /* it was launched but never answered: almost always a binary
+               built for a different CPU, dying on an illegal instruction */
+            printf("  It launched but never answered `uci` within 10s.\n"
+                   "  Check it by hand:  echo uci | %s\n"
+                   "  If that fails, the binary is not right for this CPU:"
+                   " rebuild it with `make engine`.\n", a->engine_path);
+        }
         return 1;
     }
     printf("UCI handshake ok: %s\n", e.name);

@@ -13,8 +13,9 @@ bool proc_start(Proc *pr, const char *path) {
     memset(pr, 0, sizeof *pr);
     SECURITY_ATTRIBUTES sa = { sizeof sa, NULL, TRUE };
     HANDLE in_r = NULL, in_w = NULL, out_r = NULL, out_w = NULL;
-    if (!CreatePipe(&in_r, &in_w, &sa, 0)) return false;
+    if (!CreatePipe(&in_r, &in_w, &sa, 0)) { pr->last_error = (int)GetLastError(); return false; }
     if (!CreatePipe(&out_r, &out_w, &sa, 0)) {
+        pr->last_error = (int)GetLastError();
         CloseHandle(in_r); CloseHandle(in_w);
         return false;
     }
@@ -35,6 +36,7 @@ bool proc_start(Proc *pr, const char *path) {
     snprintf(cmd, sizeof cmd, "\"%s\"", path);
     BOOL ok = CreateProcessA(NULL, cmd, NULL, NULL, TRUE, CREATE_NO_WINDOW,
                              NULL, NULL, &si, &pi);
+    if (!ok) pr->last_error = (int)GetLastError();   /* before any other call */
     CloseHandle(in_r);
     CloseHandle(out_w);
     if (!ok) {
@@ -143,9 +145,14 @@ extern char **environ;
 
 bool proc_start(Proc *pr, const char *path) {
     memset(pr, 0, sizeof *pr);
+    pr->in_w = pr->out_r = -1;   /* so that a failed start cannot close fd 0 */
     int inpipe[2], outpipe[2];
-    if (pipe(inpipe) != 0) return false;
-    if (pipe(outpipe) != 0) { close(inpipe[0]); close(inpipe[1]); return false; }
+    if (pipe(inpipe) != 0) { pr->last_error = errno; return false; }
+    if (pipe(outpipe) != 0) {
+        pr->last_error = errno;
+        close(inpipe[0]); close(inpipe[1]);
+        return false;
+    }
 
     posix_spawn_file_actions_t fa;
     posix_spawn_file_actions_init(&fa);
@@ -161,6 +168,7 @@ bool proc_start(Proc *pr, const char *path) {
     close(inpipe[0]);
     close(outpipe[1]);
     if (rc != 0) {
+        pr->last_error = rc;   /* posix_spawnp returns the error directly */
         close(inpipe[1]); close(outpipe[0]);
         return false;
     }

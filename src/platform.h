@@ -13,6 +13,7 @@ typedef struct {
     HANDLE in_w;   /* we write the child's stdin here */
     HANDLE out_r;  /* we read the child's stdout here */
     bool alive;
+    int last_error; /* GetLastError() when the launch failed, else 0 */
 } Proc;
 #else
 #include <sys/types.h>
@@ -21,6 +22,7 @@ typedef struct {
     int in_w;
     int out_r;
     bool alive;
+    int last_error; /* errno when the launch failed, else 0 */
 } Proc;
 #endif
 

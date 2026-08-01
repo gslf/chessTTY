@@ -82,7 +82,24 @@ jobs:
         uses: actions/cache@v6
         with:
           path: engine
-          key: engine-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile') }}
+          key: engine-${{ runner.os }}-${{ runner.arch }}-sse41-${{ hashFiles('Makefile') }}
+
+      # Deliberately not ARCH=native here: the runner fleet is not homogeneous,
+      # so a cached native build can be restored on a CPU that lacks those
+      # instructions and dies on the first illegal one.
+      - name: Build the engine
+        run: make engine SF_ARCHS="x86-64-sse41-popcnt x86-64"
+
+      # Talk to the engine directly before blaming the TUI for the silence.
+      - name: The engine answers UCI
+        run: |
+          ls -l engine/stockfish
+          set +e
+          printf 'uci\nquit\n' | ./engine/stockfish > uci.log
+          echo "engine exit status: $?"
+          set -e
+          head -3 uci.log
+          grep -q '^uciok' uci.log
 
       - name: Build everything
         run: make
