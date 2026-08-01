@@ -4,3 +4,7 @@ chesstui.exe
 engine/
 third_party/
 game_*.pgn
+
+# release packaging
+dist/
+.version

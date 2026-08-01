@@ -1,0 +1,169 @@
+name: Release
+
+# Tag-driven. To cut a release:
+#
+#   git tag -a v1.0.0 -m "ChessTUI 1.0.0"
+#   git push origin v1.0.0
+#
+# Each job builds Stockfish for a portable baseline CPU, builds the TUI, runs
+# the self-tests and packages a ready-to-run archive; the last job attaches
+# everything to a GitHub release with checksums and generated notes.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: linux-${{ matrix.arch }}
+    # 22.04 on purpose: binaries built against an older glibc keep working on
+    # newer distros, not the other way round.
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            arch: x86_64
+            sf_archs: x86-64-sse41-popcnt x86-64
+          - runner: ubuntu-22.04-arm
+            arch: arm64
+            sf_archs: armv8
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Version from the tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Build Stockfish
+        run: make engine SF_ARCHS="${{ matrix.sf_archs }}"
+
+      - name: Build ChessTUI
+        run: make tui CFLAGS="-O2 -Werror"
+
+      - name: Self-tests
+        run: make test
+
+      - name: Package
+        run: make dist DIST_ARCH=${{ matrix.arch }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: chesstui-linux-${{ matrix.arch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  macos:
+    name: macos-universal
+    # Apple Silicon runner; the x86_64 half is cross-compiled and merged with
+    # lipo, so one archive covers both kinds of Mac.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Version from the tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Build Stockfish (arm64 + x86_64)
+        run: |
+          set -euo pipefail
+          make engine SF_ARCHS="apple-silicon"
+          mv engine/stockfish engine/stockfish-arm64
+          make engine SF_ARCHS="x86-64-sse41-popcnt"
+          mv engine/stockfish engine/stockfish-x86_64
+          lipo -create -output engine/stockfish \
+               engine/stockfish-arm64 engine/stockfish-x86_64
+          rm engine/stockfish-arm64 engine/stockfish-x86_64
+          lipo -info engine/stockfish
+
+      - name: Build ChessTUI (universal)
+        run: make tui CFLAGS="-O2 -Werror -arch arm64 -arch x86_64"
+
+      - name: Self-tests
+        run: make test
+
+      - name: Package
+        run: make dist DIST_ARCH=universal
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: chesstui-macos-universal
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  windows:
+    name: windows-x86_64
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: git make zip curl
+          pacboy: gcc:p
+
+      - name: Version from the tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Build Stockfish
+        run: make engine SF_ARCHS="x86-64-sse41-popcnt x86-64"
+
+      - name: Build ChessTUI
+        run: make tui CFLAGS="-O2 -Werror" LDFLAGS="-static"
+
+      - name: Self-tests
+        run: make test
+
+      - name: Package
+        run: make dist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: chesstui-windows-x86_64
+          path: dist/*.zip
+          if-no-files-found: error
+
+  publish:
+    name: publish the release
+    needs: [linux, macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v7
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd assets
+          sha256sum -- * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" assets/* --clobber
+          else
+            # a tag such as v1.0.0-rc1 is published as a pre-release
+            flags=(--generate-notes)
+            case "$TAG" in *-*) flags+=(--prerelease) ;; esac
+            gh release create "$TAG" assets/* \
+              --title "ChessTUI ${TAG#v}" "${flags[@]}"
+          fi

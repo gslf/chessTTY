@@ -10,8 +10,12 @@
 #include <string.h>
 #include <time.h>
 
+#ifndef CHESSTUI_VERSION            /* set by the Makefile from the git tag */
+#define CHESSTUI_VERSION "dev"
+#endif
+
 static App g_app;
-static volatile int g_sigint = 0;
+static volatile sig_atomic_t g_sigint = 0;
 
 /* ------------------------------ difficulty ------------------------------ */
 int diff_elo(int d) {
@@ -48,13 +52,16 @@ static void flash_msg(App *a, const char *text) {
 /* ------------------------------ engine binary lookup ------------------------------ */
 static void find_engine(App *a, const char *cli_path) {
     const char *envp = getenv("CHESSTUI_ENGINE");
+    /* Searched relative to the executable: next to it (release archive), one
+       level up (build tree), then the `make install` layout
+       (<prefix>/bin/chesstui with <prefix>/lib/chesstui/stockfish). */
 #ifdef _WIN32
-    const char *rel1 = "engine\\stockfish.exe";
-    const char *rel2 = "..\\engine\\stockfish.exe";
+    static const char *const rel[] = { "engine\\stockfish.exe",
+                                       "..\\engine\\stockfish.exe", NULL };
     const char *bare = "stockfish.exe";
 #else
-    const char *rel1 = "engine/stockfish";
-    const char *rel2 = "../engine/stockfish";
+    static const char *const rel[] = { "engine/stockfish", "../engine/stockfish",
+                                       "../lib/chesstui/stockfish", NULL };
     const char *bare = "stockfish";
 #endif
     char cand[1100];
@@ -62,13 +69,16 @@ static void find_engine(App *a, const char *cli_path) {
     if (envp && *envp) { snprintf(a->engine_path, sizeof a->engine_path, "%s", envp); return; }
     char dir[1024];
     if (exe_dir(dir, sizeof dir)) {
-        snprintf(cand, sizeof cand, "%s%s", dir, rel1);
-        if (file_exists(cand)) { strcpy(a->engine_path, cand); return; }
-        snprintf(cand, sizeof cand, "%s%s", dir, rel2);
-        if (file_exists(cand)) { strcpy(a->engine_path, cand); return; }
+        for (int i = 0; rel[i]; i++) {
+            snprintf(cand, sizeof cand, "%s%s", dir, rel[i]);
+            if (file_exists(cand)) {
+                snprintf(a->engine_path, sizeof a->engine_path, "%s", cand);
+                return;
+            }
+        }
     }
-    if (file_exists(rel1)) { strcpy(a->engine_path, rel1); return; }
-    strcpy(a->engine_path, bare); /* last resort: PATH */
+    if (file_exists(rel[0])) { snprintf(a->engine_path, sizeof a->engine_path, "%s", rel[0]); return; }
+    snprintf(a->engine_path, sizeof a->engine_path, "%s", bare); /* last resort: PATH */
 }
 
 static void probe_engine(App *a) {
@@ -707,7 +717,8 @@ static int run_perft(void) {
                got == T[i].want ? "OK" : "FAIL", T[i].fen);
         if (got != T[i].want) fail++;
     }
-    printf(fail ? "\n%d TEST(S) FAILED\n" : "\nAll perft tests passed.\n", fail);
+    if (fail) printf("\n%d TEST(S) FAILED\n", fail);
+    else printf("\nAll perft tests passed.\n");
     return fail ? 1 : 0;
 }
 
@@ -746,7 +757,7 @@ static int run_engine_test(const char *path) {
                    lines[i].mate ? 999.0 * (lines[i].score > 0 ? 1 : -1) : lines[i].score / 100.0,
                    lines[i].pv_san);
     engine_quit(&e);
-    printf(done ? "Engine test passed.\n" : "ERROR: no bestmove received.\n");
+    printf("%s", done ? "Engine test passed.\n" : "ERROR: no bestmove received.\n");
     return done ? 0 : 1;
 }
 
@@ -779,7 +790,8 @@ static int run_pgn_test(const char *path) {
         remove(tmp);
     }
     pgn_list_free(L);
-    printf(fail ? "%d ERROR(S)\n" : "PGN test passed.\n", fail);
+    if (fail) printf("%d ERROR(S)\n", fail);
+    else printf("PGN test passed.\n");
     return fail ? 1 : 0;
 }
 
@@ -811,7 +823,8 @@ int main(int argc, char **argv) {
             return run_pgn_test(argv[i + 1]);
         if (!strcmp(argv[i], "--engine") && i + 1 < argc) { engine_arg = argv[++i]; continue; }
         if (!strcmp(argv[i], "--version")) {
-            printf("ChessTUI 1.0\n"
+            printf("ChessTUI %s\n", CHESSTUI_VERSION);
+            printf(
                    "License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>\n"
                    "Uses Stockfish <https://stockfishchess.org> as a separate UCI engine process.\n");
             return 0;

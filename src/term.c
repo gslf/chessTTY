@@ -1,5 +1,7 @@
 /* term.c — cross-platform terminal layer */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+#include "portable.h"   /* must come first: feature-test macros */
+
 #include "term.h"
 #include <stdarg.h>
 #include <stdio.h>

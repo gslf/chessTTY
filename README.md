@@ -1,17 +1,35 @@
 # ♞ ChessTUI
 
-Chess in your terminal, written in C, with **Stockfish built in**: the engine is
-downloaded and compiled automatically by the build — no separate install needed.
+![ChessTUI Screenshot](res/ss.png)
+
+Chess in terminal terminal, written in C, with **Stockfish built in**: the engine is
+downloaded and compiled automatically by the build.
 
 - Play against Stockfish, picking a **difficulty from 1 to 100** with a slider
 - Open a **PGN** and analyze the game move by move
 - **Live analysis**: the 3 best moves computed by a dedicated, full-strength
-  Stockfish instance (toggle it with a single key)
-- **Navigation**: step back and forth through all the moves at any time
-- **Notation always visible**, save to **PGN** when the game ends
-- Board drawn with UTF-8 characters, truecolor palette (256-color fallback);
-  four board sizes with auto-fit — on large boards the pieces become
+  Stockfish instance
+- Board drawn with UTF-8 characters, truecolor palette (256-color fallback).
+  Four board sizes with auto-fit, on large boards the pieces become
   **multi-cell block-art sprites** that fill the squares
+
+## Download
+
+Ready-to-run archives are on the
+[Releases](https://github.com/gslf/ChessTUI/releases) page — Linux (x86_64,
+arm64), macOS (universal) and Windows (x86_64). The engine travels with the
+binary, so there is nothing to install:
+
+```bash
+tar xzf chesstui-1.0.0-linux-x86_64.tar.gz
+cd chesstui-1.0.0-linux-x86_64
+./chesstui
+```
+
+`SHA256SUMS.txt` in the release checks the archives. On macOS the binaries are
+unsigned, so Gatekeeper quarantines them: run
+`xattr -dr com.apple.quarantine chesstui engine/stockfish` once in the
+extracted folder.
 
 ## Building
 
@@ -24,22 +42,22 @@ make
 ```
 
 The first run downloads the Stockfish 17.1 sources, builds them and puts the
-binary in `engine/stockfish` (~2 minutes). Subsequent builds are instant.
+binary in `engine/stockfish`. Subsequent builds are instant.
+
+`sudo make install` puts it in `PATH` (`/usr/local/bin/chesstui` plus
+`/usr/local/lib/chesstui/stockfish`; set `PREFIX=` for somewhere else,
+`make uninstall` to remove it). `make dist` builds the release archive.
+
+Already have your own Stockfish? `./chesstui --engine /path/to/stockfish`
+or set the `CHESSTUI_ENGINE` environment variable.
+
+
+## Using
 
 ```bash
 ./chesstui                    # main menu
 ./chesstui game.pgn           # jump straight into PGN analysis
 ```
-
-- **macOS / Linux**: works out of the box.
-- **Windows 10+**: build under [MSYS2](https://www.msys2.org)
-  (`pacman -S mingw-w64-ucrt-x86_64-gcc make git`), then `make`.
-  Windows Terminal is recommended for colors.
-
-Already have your own Stockfish? `./chesstui --engine /path/to/stockfish`
-or set the `CHESSTUI_ENGINE` environment variable.
-
-## Keys
 
 | Key | Action |
 |---|---|
@@ -55,7 +73,10 @@ or set the `CHESSTUI_ENGINE` environment variable.
 | `q` / Esc | back to the menu |
 | `?` | help |
 
-## Difficulty
+- Piece letters use English SAN (K, Q, R, B, N), the PGN standard
+- PGN files with several games show a picker
+- Automatic draws: stalemate, insufficient material, fifty-move rule and
+  threefold repetition.
 
 Level 1–100 drives the engine's Elo (`UCI_LimitStrength`), thinking time and
 search depth: from ~1300 Elo with near-instant replies up to full-strength
@@ -66,45 +87,13 @@ The analysis panel uses a **separate** Stockfish instance always running at
 full strength (MultiPV 3), so the suggestions stay reliable even when your
 opponent is dialed down.
 
-## Tests
-
-```bash
-make test        # move generator perft + engine dialogue
-./chesstui --pgn-test examples/immortal-games.pgn
-```
-
-## Notes
-
-- Piece letters use English SAN (K, Q, R, B, N), the PGN standard.
-- PGN files with several games show a picker; `{}` comments and `()`
-  variations are skipped on load.
-- Automatic draws: stalemate, insufficient material, fifty-move rule and
-  threefold repetition.
-- `examples/` contains two historic games to try the analysis on.
 
 ## License and attribution
 
 ChessTUI is free software, released under the **GNU General Public License,
-version 3 or later** — see [LICENSE](LICENSE). Copyright © 2026 the ChessTUI
-authors.
+version 3 or later**, see [LICENSE](LICENSE).
 
-This program would be nothing without **[Stockfish](https://stockfishchess.org)**,
-the world's strongest free chess engine — copyright © the Stockfish developers
+This TUI is based on **[Stockfish](https://stockfishchess.org)** chess engine,
 (see their [AUTHORS](https://github.com/official-stockfish/Stockfish/blob/master/AUTHORS)
 file), licensed under the
 [GPLv3](https://github.com/official-stockfish/Stockfish/blob/master/Copying.txt).
-Thank you to the Stockfish team for making world-class chess analysis freely
-available to everyone.
-
-How Stockfish is used here:
-
-- ChessTUI does not embed, link or modify Stockfish. `make engine` downloads
-  the **unmodified official sources** from
-  [github.com/official-stockfish/Stockfish](https://github.com/official-stockfish/Stockfish)
-  (release `sf_17.1`), builds them locally — the Stockfish build also fetches
-  its NNUE evaluation networks — and places the binary in `engine/`.
-- At runtime the TUI talks to that binary as a **separate process** over the
-  standard [UCI protocol](https://backscattering.de/chess/uci/).
-- If you redistribute ChessTUI **together with a compiled Stockfish binary**
-  (e.g. the `engine/` folder), the GPLv3 requires you to also make the
-  corresponding Stockfish source code available to your users.

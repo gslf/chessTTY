@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Fast lane: no engine, just the TUI compiled with warnings as errors, on
+  # every platform it claims to support.  GCC is here on purpose — it is
+  # stricter than clang and is what most Linux users build with.  The macOS
+  # entry compiles both slices, so an Intel-only breakage cannot slip through.
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux · gcc
+            os: ubuntu-latest
+            cc: gcc
+            cflags: -O2 -Werror
+          - name: linux · clang
+            os: ubuntu-latest
+            cc: clang
+            cflags: -O2 -Werror
+          - name: macos · intel + apple silicon
+            os: macos-latest
+            cc: clang
+            cflags: -O2 -Werror -arch arm64 -arch x86_64
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build (warnings are errors)
+        run: make tui CC=${{ matrix.cc }} CFLAGS="${{ matrix.cflags }}"
+
+      - name: Move generator self-test
+        run: ./chesstui --perft
+
+      - name: PGN parser self-test
+        run: ./chesstui --pgn-test examples/immortal-games.pgn
+
+  # Same, on the Windows side of the #ifdefs.
+  windows:
+    name: windows · gcc (msys2)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: make
+          pacboy: gcc:p
+
+      - name: Build (warnings are errors)
+        run: make tui CFLAGS="-O2 -Werror"
+
+      - name: Move generator self-test
+        run: ./chesstui.exe --perft
+
+      - name: PGN parser self-test
+        run: ./chesstui.exe --pgn-test examples/immortal-games.pgn
+
+  # Slow lane: the whole thing, including building Stockfish and talking to it.
+  engine:
+    name: full build · engine dialogue
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Cache the built engine
+        uses: actions/cache@v6
+        with:
+          path: engine
+          key: engine-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile') }}
+
+      - name: Build everything
+        run: make
+
+      - name: Self-tests
+        run: make test

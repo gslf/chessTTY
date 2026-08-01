@@ -1,5 +1,7 @@
 /* platform.c — processes, pipes and cross-platform helpers */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+#include "portable.h"   /* must come first: feature-test macros */
+
 #include "platform.h"
 #include <stdio.h>
 #include <string.h>
@@ -224,8 +226,12 @@ long long now_ms(void) {
 }
 
 int cpu_count(void) {
+#ifdef _SC_NPROCESSORS_ONLN
     long n = sysconf(_SC_NPROCESSORS_ONLN);
     return n > 0 ? (int)n : 1;
+#else
+    return 1;   /* not a POSIX standard query: assume a single core */
+#endif
 }
 
 bool exe_dir(char *buf, size_t n) {

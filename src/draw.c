@@ -142,7 +142,8 @@ static void score_str(const EngineLine *L, char *out, size_t n) {
         else snprintf(out, n, "#-%d", -L->score);
     } else {
         double v = L->score / 100.0;
-        if (v >= 100) v = 99.9; if (v <= -100) v = -99.9;
+        if (v >= 100) v = 99.9;
+        if (v <= -100) v = -99.9;
         snprintf(out, n, "%+.2f", v);
     }
 }
@@ -568,11 +569,15 @@ static void draw_menu(App *a, int *cur_r, int *cur_c) {
         sb_printf(b, "%s ", sel ? "▸" : " ");
         char line[128];
         if (i == 1) {
-            char bar[64] = "";
+            char bar[64];               /* 20 cells × 3 UTF-8 bytes + NUL */
             int fill = (a->menu_diff + 4) / 5; /* 1..20 */
-            char *o = bar;
-            for (int j = 0; j < 20; j++)
-                o += sprintf(o, "%s", j < fill ? "█" : "░");
+            size_t bl = 0;
+            for (int j = 0; j < 20; j++) {
+                const char *cell = j < fill ? "█" : "░";
+                memcpy(bar + bl, cell, 3);
+                bl += 3;
+            }
+            bar[bl] = 0;
             snprintf(line, sizeof line, "Difficulty  ‹%s› %3d", bar, a->menu_diff);
             put_padded(b, line, 44);
             t_style_fg(b, CL_DIM, 0);

@@ -69,7 +69,7 @@ bool pos_from_fen(Pos *p, const char *fen) {
 }
 
 void pos_to_fen(const Pos *p, char *buf, size_t n) {
-    char tmp[128];
+    char tmp[160];   /* 71 board + 4 side + 4 castling + 3 ep + clocks */
     char *o = tmp;
     for (int r = 7; r >= 0; r--) {
         int run = 0;
@@ -96,8 +96,7 @@ void pos_to_fen(const Pos *p, char *buf, size_t n) {
     *o++ = ' ';
     if (p->ep >= 0) { *o++ = (char)('a' + FILE_OF(p->ep)); *o++ = (char)('1' + RANK_OF(p->ep)); }
     else *o++ = '-';
-    o += sprintf(o, " %d %d", p->halfmove, p->fullmove);
-    *o = 0;
+    snprintf(o, sizeof tmp - (size_t)(o - tmp), " %d %d", p->halfmove, p->fullmove);
     snprintf(buf, n, "%s", tmp);
 }
 
@@ -461,7 +460,7 @@ bool san_to_move(const Pos *p, const char *san, Move *out) {
         else return false;
     }
 
-    Move found;
+    Move found = { 0, 0, 0 };
     int count = 0;
     for (int i = 0; i < nl; i++) {
         Move m = list[i];
