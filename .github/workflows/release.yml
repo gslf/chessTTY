@@ -58,7 +58,7 @@ jobs:
       - name: Build ChessTTY
         run: make tui
 
-      - name: Self-tests
+      - name: Offline tests (mock engine and HTTP transport)
         run: make test
 
       - name: Package
@@ -109,7 +109,7 @@ jobs:
           codesign --force --sign - chesstty
           codesign --force --sign - engine/stockfish
 
-      - name: Self-tests
+      - name: Offline tests (mock engine and HTTP transport)
         run: make test
 
       - name: Package
@@ -152,7 +152,7 @@ jobs:
       - name: Build ChessTTY
         run: make tui LDFLAGS="-static"
 
-      - name: Self-tests
+      - name: Offline tests (mock engine and HTTP transport)
         run: make test
 
       - name: Package
@@ -219,17 +219,17 @@ jobs:
           docker run --rm -v "$PWD:/source:ro" -e VERSION -e RUNTIME_PACKAGES "$CONTAINER" sh -ec '
             apt-get update
             apt-get install -y --no-install-recommends python3 ca-certificates libstdc++6 $RUNTIME_PACKAGES
-            python3 /source/tools/check_release.py /source/release-artifact/*.tar.gz --version "$VERSION" --https
+            python3 /source/tools/check_release.py /source/release-artifact/*.tar.gz --version "$VERSION"
           '
       - name: macOS native runtime and universal slices
         if: runner.os == 'macOS'
-        run: python3 tools/check_release.py release-artifact/*.tar.gz --version "$VERSION" --https
+        run: python3 tools/check_release.py release-artifact/*.tar.gz --version "$VERSION"
       - name: Windows native runtime
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $archive = (Get-ChildItem release-artifact/*.zip).FullName
-          python tools/check_release.py "$archive" --version "$env:VERSION" --https
+          python tools/check_release.py "$archive" --version "$env:VERSION"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   publish:

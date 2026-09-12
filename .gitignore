@@ -23,3 +23,9 @@ dist/
 
 # Python test/tool caches
 __pycache__/
+
+/keybindings-engine
+/keybindings-engine.exe
+
+/chesstty-test
+/chesstty-test.exe

@@ -27,6 +27,11 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifdef CHESSTTY_TEST_MOCKS
+#define CHESSTTY_AUTH_IMPLEMENTATION
+#include "../tests/auth_mock.h"
+#endif
+
 bool oauth_challenge(const char *verifier, char out[44]) {
     unsigned char digest[32];
 #ifdef _WIN32
@@ -176,7 +181,9 @@ void browser_reap(void) {
 #endif
 }
 bool open_browser(const char *url) {
-#ifdef _WIN32
+#ifdef CHESSTTY_TEST_MOCKS
+    (void)url; return false;
+#elif defined(_WIN32)
     return (intptr_t)ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL) > 32;
 #else
     browser_reap();

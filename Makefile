@@ -187,15 +187,24 @@ run: all
 regression-test$(EXE): tests/regression.c src/clocks.c src/chess.c src/game.c src/pgn.c src/db.c src/platform.c src/openings.c $(HDR) src/openings_data.inc
 	$(CC) $(ALL_CFLAGS) $(CPPFLAGS) -Isrc $(LDFLAGS) -o $@ tests/regression.c src/clocks.c src/chess.c src/game.c src/pgn.c src/db.c src/platform.c src/openings.c $(LDLIBS)
 
-online-test$(EXE): tests/online.c src/online.c src/auth.c src/json.c src/clocks.c src/chess.c src/game.c src/pgn.c src/platform.c src/openings.c src/commands.c $(HDR)
-	$(CC) $(ALL_CFLAGS) $(CPPFLAGS) -Isrc $(LDFLAGS) -o $@ tests/online.c src/online.c src/auth.c src/json.c src/clocks.c src/chess.c src/game.c src/pgn.c src/platform.c src/openings.c src/commands.c $(LDLIBS)
+online-test$(EXE): tests/online.c src/online.c src/auth.c tests/auth_mock.c tests/no_network.c src/json.c src/clocks.c src/chess.c src/game.c src/pgn.c src/platform.c src/openings.c src/commands.c $(HDR) tests/auth_mock.h
+	$(CC) $(ALL_CFLAGS) $(CPPFLAGS) -DCHESSTTY_TEST_MOCKS -Isrc $(LDFLAGS) -o $@ tests/online.c src/online.c src/auth.c tests/auth_mock.c tests/no_network.c src/json.c src/clocks.c src/chess.c src/game.c src/pgn.c src/platform.c src/openings.c src/commands.c $(LDLIBS)
 
 test-online: online-test$(EXE)
 	@mkdir -p .online-test
 	./online-test$(EXE) .online-test/game.pgn
 	@rmdir .online-test
 
-test-keybindings: chesstty$(EXE)
+# UI tests must not accidentally depend on a locally installed Stockfish.
+keybindings-engine$(EXE): tests/uci_fixture.c src/chess.c src/chess.h
+	$(CC) $(ALL_CFLAGS) $(CPPFLAGS) -Isrc $(LDFLAGS) -o $@ tests/uci_fixture.c src/chess.c
+
+# The UI keeps its real event loop and drawing, with a mocked online boundary.
+UI_TEST_SRC = $(filter-out src/online.c src/auth.c,$(SRC)) tests/online_mock.c
+chesstty-test$(EXE): $(UI_TEST_SRC) $(HDR) src/openings_data.inc .version
+	$(CC) $(ALL_CFLAGS) $(CPPFLAGS) $(VERSION_DEF) -Isrc $(LDFLAGS) -o $@ $(UI_TEST_SRC) $(LDLIBS)
+
+test-keybindings: chesstty-test$(EXE) keybindings-engine$(EXE)
 	python3 tests/keybindings.py
 
 test-regression: regression-test$(EXE)
@@ -203,14 +212,14 @@ test-regression: regression-test$(EXE)
 	./regression-test$(EXE) .regression-test/game.pgn
 	@rmdir .regression-test
 
-test: chesstty$(EXE) test-regression test-online
+test: chesstty$(EXE) keybindings-engine$(EXE) test-regression test-online
 	./chesstty$(EXE) --perft
 	./chesstty$(EXE) --openings-test
 	./chesstty$(EXE) --pgn-test examples/immortal-games.pgn
 	@rm -rf .dbtest && mkdir -p .dbtest && cp examples/*.pgn .dbtest/
 	./chesstty$(EXE) --db-test .dbtest
 	@rm -rf .dbtest
-	./chesstty$(EXE) --engine-test
+	./chesstty$(EXE) --engine-test "$(CURDIR)/keybindings-engine$(EXE)"
 
 install: all
 	install -d "$(BINDIR)" "$(LIBDIR)"
@@ -223,7 +232,7 @@ uninstall:
 	rm -rf "$(LIBDIR)"
 
 clean:
-	rm -f $(OBJ) chesstty$(EXE) regression-test$(EXE) online-test$(EXE) .version
+	rm -f $(OBJ) chesstty$(EXE) regression-test$(EXE) online-test$(EXE) keybindings-engine$(EXE) chesstty-test$(EXE) .version
 	rm -rf dist .dbtest
 
 distclean: clean

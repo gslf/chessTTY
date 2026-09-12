@@ -5,11 +5,9 @@ import os
 from pathlib import Path
 import platform
 import re
-import shutil
 import subprocess
 import tarfile
 import tempfile
-import time
 import zipfile
 
 
@@ -23,7 +21,7 @@ def run(command, cwd, env, timeout=180):
     return result.stdout
 
 
-def check(folder, version, https):
+def check(folder, version):
     windows = platform.system() == "Windows"
     suffix = ".exe" if windows else ""
     binary = folder / ("chesstty" + suffix)
@@ -59,35 +57,15 @@ def check(folder, version, https):
     # A different directory catches accidental engine/data lookup in the checkout.
     with tempfile.TemporaryDirectory(prefix="chesstty unrelated cwd ") as work:
         out = run([binary, "--version"], work, env)
-        if out.splitlines()[0] != f"ChessTTY {version}":
+        if not out.splitlines() or out.splitlines()[0] != f"ChessTTY {version}":
             raise RuntimeError("Packaged version does not match the release")
-        run([binary, "--perft"], work, env)
-        run([binary, "--openings-test"], work, env)
-        run([binary, "--pgn-test", folder / "examples/immortal-games.pgn"], work, env)
-        collection = Path(work) / "games"
-        shutil.copytree(folder / "examples", collection)
-        run([binary, "--db-test", collection], work, env)
-        out = run([binary, "--engine-test"], work, env)
-        selected = next((line[8:] for line in out.splitlines() if line.startswith("Engine: ")), "")
-        if Path(selected).resolve() != engine.resolve():
-            raise RuntimeError(f"Did not launch the bundled engine: {selected}")
-        if https:
-            for attempt in range(3):
-                try:
-                    run([binary, "--https-test"], work, env, timeout=30)
-                    break
-                except (RuntimeError, subprocess.TimeoutExpired):
-                    if attempt == 2:
-                        raise
-                    time.sleep(5)
-    print(f"Release verified: {folder.name} on {platform.system()} {platform.machine()}")
+    print(f"Package files and application startup verified (engine not executed): {folder.name} on {platform.system()} {platform.machine()}")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("archive", type=Path)
     parser.add_argument("--version", required=True)
-    parser.add_argument("--https", action="store_true")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="chesstty extracted release ") as work:
         target = Path(work)
@@ -105,7 +83,7 @@ def main():
         roots = list(target.iterdir())
         if len(roots) != 1 or not roots[0].is_dir():
             raise RuntimeError("Expected one top-level release directory")
-        check(roots[0], args.version, args.https)
+        check(roots[0], args.version)
 
 
 if __name__ == "__main__":

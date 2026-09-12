@@ -9,6 +9,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef CHESSTTY_TEST_MOCKS
+/* Test fixtures supply game states; dispatching real HTTP is an error. */
+CURLcode test_http_forbidden(CURL *easy);
+CURLMcode test_stream_forbidden(CURLM *multi, CURL *easy);
+#define curl_easy_perform test_http_forbidden
+#define curl_multi_add_handle test_stream_forbidden
+#endif
 
 #define HOST "https://lichess.org"
 enum { REQUEST, EVENTS, GAME, SEEK, CHANNELS };

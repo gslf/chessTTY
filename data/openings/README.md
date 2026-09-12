@@ -10,6 +10,8 @@ opening lines, not game statistics, popularity rankings or engine evaluations.
 
 To update, replace all five TSVs from one upstream commit, update this revision,
 then run `python3 tools/build_openings.py` on a POSIX host with a C compiler.
+Use `--check` to verify the checked-in output without modifying it, or
+`--output PATH` to generate a separate file. Importing the module does not run it.
 Commit the generated `src/openings_data.inc` as well. Normal builds are offline
 and do not run Python. Run `./chesstty --openings-test` after rebuilding.
 

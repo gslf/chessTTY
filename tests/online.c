@@ -1,10 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "portable.h"
-#ifndef _WIN32
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <unistd.h>
-#endif
+#include <errno.h>
+#include "auth_mock.h"
 #include "online.h"
 #include "auth.h"
 #include "json.h"
@@ -58,28 +55,76 @@ static void parser(void) {
     CHECK(oauth_challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk", challenge));
     CHECK(!strcmp(challenge, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM")); /* RFC 7636 */
 }
+static int callback_client(const OAuth *a) {
+    CHECK(strstr(a->redirect, "http://127.0.0.1:") == a->redirect);
+    return auth_mock_connect();
+}
+static void callback_send(int sock, const char *data, size_t len) {
+    (void)sock;
+    while (len) {
+        int sent = auth_mock_write(data, len);
+        if (sent < 0 && errno == EINTR) continue;
+        CHECK(sent > 0);
+        data += sent; len -= (size_t)sent;
+    }
+}
+static void callback_reply(OAuth *a, int sock, char *code, size_t n,
+                           int expected, const char *http_status) {
+    (void)sock;
+    char reply[512] = {0}; size_t used = 0;
+    int result = 0; bool closed = false;
+    for (int tick = 0; tick < 1000; tick++) {
+        int polled = oauth_poll(a, code, n, 200 + tick);
+        if (polled) { CHECK(result == 0); result = polled; }
+        CHECK(used < sizeof reply - 1);
+        int got = auth_mock_read(reply + used, sizeof reply - 1 - used);
+        if (got > 0) { used += (size_t)got; reply[used] = 0; }
+        else if (got == 0) { closed = true; break; }
+        else CHECK(errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR);
+    }
+    if (!closed || result != expected || strncmp(reply, http_status, strlen(http_status))) {
+        fprintf(stderr, "Callback failed: closed=%d, result=%d (expected %d), HTTP=%s\n",
+                closed, result, expected, reply);
+        exit(1);
+    }
+}
 static void callbacks(void) {
-#ifndef _WIN32
-    OAuth a = {0}; char url[1024], code[128];
+    OAuth a = {0}; char url[1024], code[128] = {0};
     CHECK(oauth_begin(&a, url, sizeof url, 100));
     CHECK(strstr(url, "code_challenge_method=S256") && strstr(url, "scope=board%3Aplay"));
-    unsigned port; CHECK(sscanf(a.redirect, "http://127.0.0.1:%u/callback", &port) == 1);
     for (int valid = 0; valid < 2; valid++) {
-        int sock = socket(AF_INET, SOCK_STREAM, 0); CHECK(sock >= 0);
-        struct sockaddr_in addr = {0}; addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK); addr.sin_port = htons((unsigned short)port);
-        CHECK(connect(sock, (struct sockaddr *)&addr, sizeof addr) == 0);
-        char req[256]; int len = snprintf(req, sizeof req, "GET /callback?code=test_code&state=%s HTTP/1.1\r\nHost: localhost\r\n\r\n", valid ? a.state : "wrong");
-        CHECK(send(sock, req, (size_t)len, 0) == len);
-        CHECK(oauth_poll(&a, code, sizeof code, 200) == valid);
+        int sock = callback_client(&a);
+        /* A connected client need not have sent anything yet. */
+        CHECK(oauth_poll(&a, code, sizeof code, 100) == 0 && a.active);
+        char req[256];
+        int len = snprintf(req, sizeof req, "GET /callback?code=test_code&state=%s HTTP/1.1\r\nHost: localhost\r\n\r\n", valid ? a.state : "wrong");
+        CHECK(len > 0 && (size_t)len < sizeof req);
+        /* Deliberately split the header terminator across writes. A pending
+           read is not evidence that the invalid-state request was rejected. */
+        callback_send(sock, req, (size_t)len - 2);
+        CHECK(oauth_poll(&a, code, sizeof code, 100) == 0 && a.active);
+        callback_send(sock, req + len - 2, 2);
+        callback_reply(&a, sock, code, sizeof code, valid,
+                       valid ? "HTTP/1.1 200 OK" : "HTTP/1.1 400 Bad Request");
         CHECK(a.active == !valid);
-        close(sock);
+        if (!valid) CHECK(!*code && *a.verifier);
     }
     CHECK(!strcmp(code, "test_code") && *a.verifier);
     oauth_close(&a); CHECK(!*a.verifier);
+
+    CHECK(oauth_begin(&a, url, sizeof url, 100));
+    int sock = callback_client(&a);
+    char req[256];
+    int len = snprintf(req, sizeof req, "GET /callback?error=access_denied&state=%s HTTP/1.1\r\n\r\n", a.state);
+    CHECK(len > 0 && (size_t)len < sizeof req);
+    callback_send(sock, req, (size_t)len);
+    callback_reply(&a, sock, code, sizeof code, -1, "HTTP/1.1 400 Bad Request");
+    CHECK(!a.active);
+    oauth_close(&a);
+
+    /* Deadline arithmetic is deterministic and separate from socket timing. */
     CHECK(oauth_begin(&a, url, sizeof url, 100));
     CHECK(oauth_poll(&a, code, sizeof code, 180100) == -1 && !a.active);
-#endif
 }
 static void pgn_clocks(void) {
     char comment[400]; memset(comment, 'a', sizeof comment - 1); comment[sizeof comment - 1] = 0;

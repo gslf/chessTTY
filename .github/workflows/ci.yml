@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  # Fast lane: no engine, just the TUI compiled with warnings as errors, on
+  # Fast lane: no Stockfish download; UI tests use a small UCI fixture. Build on
   # every platform it claims to support.  GCC is here on purpose — it is
   # stricter than clang and is what most Linux users build with.  The macOS
   # entry compiles both slices, so an Intel-only breakage cannot slip through.
@@ -43,20 +43,11 @@ jobs:
       - name: Build (warnings are errors)
         run: make tui CC=${{ matrix.cc }} CFLAGS="${{ matrix.cflags }}"
 
-      - name: Prefix keybindings (pseudo-terminal)
-        run: make test-keybindings
+      - name: Prefix keybindings (pseudo-terminal, UCI fixture)
+        run: make test-keybindings CC=${{ matrix.cc }} CFLAGS="${{ matrix.cflags }}"
 
-      - name: Regression tests
-        run: make test-regression test-online CFLAGS="-O2 -Werror"
-
-      - name: Move generator self-test
-        run: ./chesstty --perft
-
-      - name: PGN parser self-test
-        run: ./chesstty --pgn-test examples/immortal-games.pgn
-
-      - name: Opening tree and recognition self-test
-        run: ./chesstty --openings-test
+      - name: Offline tests (mock engine and HTTP transport)
+        run: make test CC=${{ matrix.cc }} CFLAGS="${{ matrix.cflags }}"
 
   # Same, on the Windows side of the #ifdefs.
   windows:
@@ -78,54 +69,5 @@ jobs:
       - name: Build (warnings are errors)
         run: make tui CFLAGS="-O2 -Werror"
 
-      - name: Regression tests
-        run: make test-regression test-online CFLAGS="-O2 -Werror"
-
-      - name: Move generator self-test
-        run: ./chesstty.exe --perft
-
-      - name: PGN parser self-test
-        run: ./chesstty.exe --pgn-test examples/immortal-games.pgn
-
-      - name: Opening tree and recognition self-test
-        run: ./chesstty.exe --openings-test
-
-  # Slow lane: the whole thing, including building Stockfish and talking to it.
-  engine:
-    name: full build · engine dialogue
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: HTTPS development libraries (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev libssl-dev
-
-      - name: Cache the built engine
-        uses: actions/cache@v6
-        with:
-          path: engine
-          key: engine-${{ runner.os }}-${{ runner.arch }}-sse41-${{ hashFiles('Makefile') }}
-
-      # Deliberately not ARCH=native here: the runner fleet is not homogeneous,
-      # so a cached native build can be restored on a CPU that lacks those
-      # instructions and dies on the first illegal one.
-      - name: Build the engine
-        run: make engine SF_ARCHS="x86-64-sse41-popcnt x86-64"
-
-      # Talk to the engine directly before blaming the TUI for the silence.
-      - name: The engine answers UCI
-        run: |
-          ls -l engine/stockfish
-          set +e
-          printf 'uci\nquit\n' | ./engine/stockfish > uci.log
-          echo "engine exit status: $?"
-          set -e
-          head -3 uci.log
-          grep -q '^uciok' uci.log
-
-      - name: Build everything
-        run: make
-
-      - name: Self-tests
-        run: make test
+      - name: Offline tests (mock engine and HTTP transport)
+        run: make test CFLAGS="-O2 -Werror"

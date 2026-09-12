@@ -55,8 +55,8 @@ Publication waits for tests of the extracted archives: Linux in Ubuntu 22.04
 containers with runtime packages only (also Ubuntu 24.04 on x86_64), macOS on
 both Intel and Apple Silicon runners, and Windows with MSYS2 removed from the
 application's PATH. The checks run from an unrelated directory, verify the
-bundled engine and PGN/database data, and exercise HTTPS certificate validation
-without a Lichess account. macOS dependencies must be system libraries.
+required package files and application startup/version. macOS also checks
+binary metadata. They never launch Stockfish or contact Lichess. macOS dependencies must be system libraries.
 
 Linux needs glibc 2.35 or newer, libcurl 4, OpenSSL 3, libstdc++6 and a system CA
 store (Ubuntu 22.04 or newer). Windows builds use UCRT and Schannel on Windows
@@ -68,7 +68,7 @@ Windows Authenticode signatures.
 For a local archive check:
 
 ```bash
-python3 tools/check_release.py dist/chesstty-VERSION-linux-x86_64.tar.gz --version VERSION --https
+python3 tools/check_release.py dist/chesstty-VERSION-linux-x86_64.tar.gz --version VERSION
 ```
 
 ## Building
@@ -97,12 +97,19 @@ binary in `engine/stockfish`. Subsequent builds are instant.
 Already have your own Stockfish? `./chesstty --engine /path/to/stockfish`
 or set the `CHESSTTY_ENGINE` environment variable.
 
-`make test` runs the move generator, opening index, PGN (including the
-annotation and clock round trips), database index and engine self-tests.
-It also tests OAuth PKCE and loopback callbacks, streamed game-state replay,
-reconnection snapshots and clock boundaries; no Lichess account is needed.
-`make test-keybindings` runs the prefix-command integration tests on POSIX
-with Python 3 and a pseudo-terminal, including the minimum 78×22 terminal size.
+`make test` is offline and needs no Stockfish installation. It checks chess
+logic, openings, PGN, database indexing, clocks and the UCI protocol using a
+small deterministic engine fixture. Lichess responses come from JSON fixtures;
+OAuth transport is mocked in memory, including fragmented reads and EAGAIN.
+Unexpected real HTTP dispatch fails the unit test. No TCP sockets or browser
+are opened by the OAuth tests, on any platform.
+
+`make test-keybindings` builds a test TUI with the online boundary mocked,
+uses the same fake UCI engine and a POSIX pseudo-terminal
+at 78×22. It smoke-tests prefix commands, cancellation and context changes.
+Clock accuracy, PGN and database logic belong to the C tests.
+Stockfish is built for release packaging only; the automatic test suites never
+execute it. Neither CI nor release validation sends requests to Lichess.
 
 
 ## Using
