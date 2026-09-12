@@ -20,7 +20,6 @@ static void position(Pos *pos, char *command) {
 }
 
 int main(void) {
-    setvbuf(stdout, NULL, _IOLBF, 0);
     Pos pos; pos_start(&pos);
     char line[10000], best[8] = "0000";
     while (fgets(line, sizeof line, stdin)) {
@@ -37,6 +36,9 @@ int main(void) {
             printf("info depth 1 multipv 1 score cp 0 pv %s\n", best);
             if (!strstr(line, "infinite")) printf("bestmove %s\n", best);
         } else if (!strcmp(line, "stop")) printf("bestmove %s\n", best);
+        /* Windows treats _IOLBF as full buffering. Deliver each response before
+           waiting for the next command, even when stdout is a pipe. */
+        if (fflush(stdout) == EOF) return 1;
     }
     return 0;
 }
