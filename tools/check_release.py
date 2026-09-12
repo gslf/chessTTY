@@ -35,7 +35,8 @@ def check(folder, version):
         raise RuntimeError("Missing static-library license notices")
     if platform.system() == "Darwin":
         for path in (binary, engine):
-            subprocess.run(["lipo", "-verify_arch", "arm64", "x86_64", str(path)], check=True)
+            # -verify_arch consumes all following arguments as architecture names.
+            subprocess.run(["lipo", str(path), "-verify_arch", "arm64", "x86_64"], check=True)
             subprocess.run(["codesign", "--verify", "--strict", "--all-architectures", str(path)], check=True)
             deps = subprocess.check_output(["otool", "-L", str(path)], text=True)
             print(deps)
@@ -43,15 +44,17 @@ def check(folder, version):
                 if line[:1].isspace() and line.strip() and not line.lstrip().startswith(("/usr/lib/", "/System/Library/")):
                     raise RuntimeError(f"Non-system macOS dependency: {line}")
     env = os.environ.copy()
+    if windows:
+        # Unlike os.environ on Windows, its plain dict copy is case-sensitive.
+        env = {key.upper(): value for key, value in env.items()}
     for key in list(env):
         if key.upper().startswith(("LD_", "DYLD_", "CHESSTTY_")) or key.upper() in (
                 "CURL_CA_BUNDLE", "SSL_CERT_FILE", "SSL_CERT_DIR", "OPENSSL_CONF", "OPENSSL_MODULES"):
             del env[key]
     if windows:
-        for key in list(env):
-            if key.upper() == "PATH":
-                del env[key]
-        env["PATH"] = str(Path(env["SystemRoot"]) / "System32")
+        if not env.get("SYSTEMROOT"):
+            raise RuntimeError("Windows environment is missing SYSTEMROOT")
+        env["PATH"] = str(Path(env["SYSTEMROOT"]) / "System32")
     else:
         env["PATH"] = "/usr/bin:/bin"
     # A different directory catches accidental engine/data lookup in the checkout.
