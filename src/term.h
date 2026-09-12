@@ -9,11 +9,11 @@
 
 typedef enum {
     K_NONE = 0,
+    K_CTRL,        /* Ctrl-letter in .ch, lower case */
     K_CHAR,        /* ASCII character in .ch */
     K_ENTER, K_BACKSPACE, K_ESC, K_TAB,
     K_UP, K_DOWN, K_LEFT, K_RIGHT,
     K_HOME, K_END, K_PGUP, K_PGDN, K_DEL,
-    K_RESIZE,
 } KeyType;
 
 typedef struct {

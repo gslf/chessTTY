@@ -4,7 +4,65 @@
 
 #include "platform.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+#ifdef _WIN32
+#define PATH_SEP "\\"
+#else
+#define PATH_SEP "/"
+#endif
+
+
+/* ---------------- portable path helpers (shared) ---------------- */
+void path_join(char *out, size_t n, const char *dir, const char *name) {
+    size_t dl = strlen(dir);
+    bool need_sep = dl > 0 && dir[dl - 1] != '/' && dir[dl - 1] != '\\';
+    snprintf(out, n, "%s%s%s", dir, need_sep ? PATH_SEP : "", name);
+}
+
+/* Case-insensitive "does `name` end with `suffix`". */
+static bool has_suffix_ci(const char *name, const char *suffix) {
+    if (!suffix || !*suffix) return true;
+    size_t nl = strlen(name), sl = strlen(suffix);
+    if (sl > nl) return false;
+    const char *p = name + nl - sl;
+    for (size_t i = 0; i < sl; i++) {
+        char a = p[i], b = suffix[i];
+        if (a >= 'A' && a <= 'Z') a = (char)(a + 32);
+        if (b >= 'A' && b <= 'Z') b = (char)(b + 32);
+        if (a != b) return false;
+    }
+    return true;
+}
+
+static int name_cmp(const void *a, const void *b) {
+    return strcmp((const char *)a, (const char *)b);
+}
+
+/* Creates one directory whose parent already exists (platform primitive). */
+static bool mkdir_one(const char *path);
+
+/* Creates `path` and any missing parent, like `mkdir -p`: the collection folder
+   may sit several levels below a data directory that does not exist yet. */
+bool dir_make(const char *path) {
+    if (dir_exists(path)) return true;
+    char tmp[PATH_MAX_CT];
+    size_t n = strlen(path);
+    if (n == 0 || n >= sizeof tmp) return false;
+    memcpy(tmp, path, n + 1);
+    while (n > 1 && (tmp[n - 1] == '/' || tmp[n - 1] == '\\')) tmp[--n] = 0;
+    /* From index 1, so a leading separator is not mistaken for a component. */
+    for (size_t i = 1; i < n; i++) {
+        if (tmp[i] != '/' && tmp[i] != '\\') continue;
+        char sep = tmp[i];
+        tmp[i] = 0;
+        if (!dir_exists(tmp)) mkdir_one(tmp);
+        tmp[i] = sep;
+    }
+    mkdir_one(tmp);
+    return dir_exists(path);
+}
 
 #ifdef _WIN32
 /* ------------------------------- Windows ------------------------------- */
@@ -125,14 +183,60 @@ bool file_exists(const char *path) {
     return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
 }
 
+bool dir_exists(const char *path) {
+    DWORD a = GetFileAttributesA(path);
+    return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+static bool mkdir_one(const char *path) {
+    return CreateDirectoryA(path, NULL) != 0 || dir_exists(path);
+}
+
+bool file_stat(const char *path, uint64_t *size, uint64_t *mtime) {
+    WIN32_FILE_ATTRIBUTE_DATA d;
+    if (!GetFileAttributesExA(path, GetFileExInfoStandard, &d)) return false;
+    if (d.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) return false;
+    if (size) *size = ((uint64_t)d.nFileSizeHigh << 32) | d.nFileSizeLow;
+    if (mtime) *mtime = ((uint64_t)d.ftLastWriteTime.dwHighDateTime << 32) |
+                        d.ftLastWriteTime.dwLowDateTime;
+    return true;
+}
+
+int dir_list(const char *dir, const char *suffix, char (*out)[PATH_MAX_CT], int max) {
+    char pat[PATH_MAX_CT];
+    path_join(pat, sizeof pat, dir, "*");
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pat, &fd);
+    if (h == INVALID_HANDLE_VALUE) return -1;
+    int n = 0;
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        if (!has_suffix_ci(fd.cFileName, suffix)) continue;
+        if (n >= max) break;
+        snprintf(out[n], PATH_MAX_CT, "%s", fd.cFileName);
+        n++;
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    qsort(out, (size_t)n, PATH_MAX_CT, name_cmp);
+    return n;
+}
+
+bool home_dir(char *buf, size_t n) {
+    const char *h = getenv("USERPROFILE");
+    if (h && *h) { snprintf(buf, n, "%s\\", h); return true; }
+    const char *drive = getenv("HOMEDRIVE"), *rest = getenv("HOMEPATH");
+    if (drive && rest) { snprintf(buf, n, "%s%s\\", drive, rest); return true; }
+    return false;
+}
+
 #else
 /* -------------------------------- POSIX -------------------------------- */
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <spawn.h>
 #include <sys/stat.h>
-#include <sys/time.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -154,6 +258,15 @@ bool proc_start(Proc *pr, const char *path) {
         return false;
     }
 
+    /* A second engine must not inherit the first engine's pipes. */
+    int fds[] = {inpipe[0], inpipe[1], outpipe[0], outpipe[1]};
+    for (int i = 0; i < 4; i++) {
+        if (fcntl(fds[i], F_SETFD, FD_CLOEXEC) < 0) {
+            pr->last_error = errno;
+            for (int j = 0; j < 4; j++) close(fds[j]);
+            return false;
+        }
+    }
     posix_spawn_file_actions_t fa;
     posix_spawn_file_actions_init(&fa);
     posix_spawn_file_actions_adddup2(&fa, inpipe[0], 0);
@@ -228,9 +341,9 @@ void msleep(int ms) {
 }
 
 long long now_ms(void) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (long long)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
 int cpu_count(void) {
@@ -263,6 +376,56 @@ bool exe_dir(char *buf, size_t n) {
 bool file_exists(const char *path) {
     struct stat st;
     return stat(path, &st) == 0 && S_ISREG(st.st_mode);
+}
+
+bool dir_exists(const char *path) {
+    struct stat st;
+    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+static bool mkdir_one(const char *path) {
+    return mkdir(path, 0755) == 0 || dir_exists(path);
+}
+
+bool file_stat(const char *path, uint64_t *size, uint64_t *mtime) {
+    struct stat st;
+    if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) return false;
+    if (size) *size = (uint64_t)st.st_size;
+    if (mtime) {
+#ifdef __APPLE__
+        *mtime = (uint64_t)st.st_mtimespec.tv_sec * 1000000000 + st.st_mtimespec.tv_nsec;
+#else
+        *mtime = (uint64_t)st.st_mtim.tv_sec * 1000000000 + st.st_mtim.tv_nsec;
+#endif
+    }
+    return true;
+}
+
+int dir_list(const char *dir, const char *suffix, char (*out)[PATH_MAX_CT], int max) {
+    DIR *d = opendir(dir);
+    if (!d) return -1;
+    int n = 0;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        if (e->d_name[0] == '.') continue;            /* hidden files and . .. */
+        if (!has_suffix_ci(e->d_name, suffix)) continue;
+        char full[PATH_MAX_CT];
+        path_join(full, sizeof full, dir, e->d_name);
+        if (!file_exists(full)) continue;             /* skip directories, sockets… */
+        if (n >= max) break;
+        snprintf(out[n], PATH_MAX_CT, "%s", e->d_name);
+        n++;
+    }
+    closedir(d);
+    qsort(out, (size_t)n, PATH_MAX_CT, name_cmp);
+    return n;
+}
+
+bool home_dir(char *buf, size_t n) {
+    const char *h = getenv("HOME");
+    if (!h || !*h) return false;
+    snprintf(buf, n, "%s/", h);
+    return true;
 }
 
 #endif

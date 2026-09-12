@@ -1,20 +1,21 @@
 name: Release
 
-# Tag-driven. To cut a release:
-#
-#   git tag -a v1.0.0 -m "ChessTUI 1.0.0"
-#   git push origin v1.0.0
-#
-# Each job builds Stockfish for a portable baseline CPU, builds the TUI, runs
-# the self-tests and packages a ready-to-run archive; the last job attaches
-# everything to a GitHub release with checksums and generated notes.
-#
-# Unlike CI, these builds do not use -Werror: a warning introduced by a newer
-# compiler must never be what stops a release from going out.
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - 'Makefile'
+      - 'tools/check_release.py'
+      - 'src/**'
+      - 'tests/**'
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -31,20 +32,30 @@ jobs:
         include:
           - runner: ubuntu-22.04
             arch: x86_64
-            sf_archs: x86-64-sse41-popcnt x86-64
+            sf_archs: x86-64
           - runner: ubuntu-22.04-arm
             arch: arm64
             sf_archs: armv8
     steps:
       - uses: actions/checkout@v7
 
-      - name: Version from the tag
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - name: HTTPS development libraries (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev libssl-dev
+
+      - name: Artifact version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=dev-${GITHUB_SHA:0:12}" >> "$GITHUB_ENV"
+          fi
 
       - name: Build Stockfish
         run: make engine SF_ARCHS="${{ matrix.sf_archs }}"
 
-      - name: Build ChessTUI
+      - name: Build ChessTTY
         run: make tui
 
       - name: Self-tests
@@ -55,7 +66,7 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: chesstui-linux-${{ matrix.arch }}
+          name: chesstty-linux-${{ matrix.arch }}
           path: dist/*.tar.gz
           if-no-files-found: error
 
@@ -63,27 +74,40 @@ jobs:
     name: macos-universal
     # Apple Silicon runner; the x86_64 half is cross-compiled and merged with
     # lipo, so one archive covers both kinds of Mac.
-    runs-on: macos-latest
+    runs-on: macos-15
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
     steps:
       - uses: actions/checkout@v7
 
-      - name: Version from the tag
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - name: Artifact version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=dev-${GITHUB_SHA:0:12}" >> "$GITHUB_ENV"
+          fi
 
       - name: Build Stockfish (arm64 + x86_64)
         run: |
           set -euo pipefail
-          make engine SF_ARCHS="apple-silicon"
+          make engine SF_ARCHS="apple-silicon" SF_COMP=clang
           mv engine/stockfish engine/stockfish-arm64
-          make engine SF_ARCHS="x86-64-sse41-popcnt"
+          make engine SF_ARCHS="x86-64" SF_COMP=clang
           mv engine/stockfish engine/stockfish-x86_64
           lipo -create -output engine/stockfish \
                engine/stockfish-arm64 engine/stockfish-x86_64
           rm engine/stockfish-arm64 engine/stockfish-x86_64
           lipo -info engine/stockfish
 
-      - name: Build ChessTUI (universal)
-        run: make tui CFLAGS="-O2 -arch arm64 -arch x86_64"
+      - name: Build ChessTTY (universal)
+        run: make tui CC=/usr/bin/clang CFLAGS="-O2 -arch arm64 -arch x86_64 -isysroot $(xcrun --show-sdk-path)" LDFLAGS="-L$(xcrun --show-sdk-path)/usr/lib"
+
+      - name: Ad-hoc signatures after universal linking
+        run: |
+          codesign --force --sign - chesstty
+          codesign --force --sign - engine/stockfish
 
       - name: Self-tests
         run: make test
@@ -93,13 +117,13 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: chesstui-macos-universal
+          name: chesstty-macos-universal
           path: dist/*.tar.gz
           if-no-files-found: error
 
   windows:
     name: windows-x86_64
-    runs-on: windows-latest
+    runs-on: windows-2022
     defaults:
       run:
         shell: msys2 {0}
@@ -111,32 +135,107 @@ jobs:
           msystem: UCRT64
           update: true
           install: git make zip curl
-          pacboy: gcc:p
+          pacboy: gcc:p curl-winssl:p pkgconf:p
 
-      - name: Version from the tag
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - name: Artifact version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=dev-${GITHUB_SHA:0:12}" >> "$GITHUB_ENV"
+          fi
 
       - name: Build Stockfish
-        run: make engine SF_ARCHS="x86-64-sse41-popcnt x86-64"
+        run: make engine SF_ARCHS="x86-64"
 
-      - name: Build ChessTUI
+      - name: Build ChessTTY
         run: make tui LDFLAGS="-static"
 
       - name: Self-tests
         run: make test
 
       - name: Package
-        run: make dist
+        run: make dist DIST_ARCH=x86_64
 
       - uses: actions/upload-artifact@v7
         with:
-          name: chesstui-windows-x86_64
+          name: chesstty-windows-x86_64
           path: dist/*.zip
           if-no-files-found: error
 
+  verify:
+    name: verify · ${{ matrix.name }}
+    needs: [linux, macos, windows]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86_64 · Ubuntu 22.04
+            runner: ubuntu-22.04
+            artifact: chesstty-linux-x86_64
+            container: ubuntu:22.04
+            runtime: libcurl4 libssl3
+          - name: Linux arm64 · Ubuntu 22.04
+            runner: ubuntu-22.04-arm
+            artifact: chesstty-linux-arm64
+            container: ubuntu:22.04
+            runtime: libcurl4 libssl3
+          - name: Linux x86_64 · Ubuntu 24.04
+            runner: ubuntu-24.04
+            artifact: chesstty-linux-x86_64
+            container: ubuntu:24.04
+            runtime: libcurl4t64 libssl3t64
+          - name: macOS · Apple Silicon
+            runner: macos-15
+            artifact: chesstty-macos-universal
+          - name: macOS · Intel
+            runner: macos-15-intel
+            artifact: chesstty-macos-universal
+          - name: Windows · without MSYS2 on PATH
+            runner: windows-2022
+            artifact: chesstty-windows-x86_64
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: release-artifact
+      - name: Artifact version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=dev-${GITHUB_SHA:0:12}" >> "$GITHUB_ENV"
+          fi
+      - name: Linux runtime-only container
+        if: runner.os == 'Linux'
+        env:
+          CONTAINER: ${{ matrix.container }}
+          RUNTIME_PACKAGES: ${{ matrix.runtime }}
+        run: |
+          docker run --rm -v "$PWD:/source:ro" -e VERSION -e RUNTIME_PACKAGES "$CONTAINER" sh -ec '
+            apt-get update
+            apt-get install -y --no-install-recommends python3 ca-certificates libstdc++6 $RUNTIME_PACKAGES
+            python3 /source/tools/check_release.py /source/release-artifact/*.tar.gz --version "$VERSION" --https
+          '
+      - name: macOS native runtime and universal slices
+        if: runner.os == 'macOS'
+        run: python3 tools/check_release.py release-artifact/*.tar.gz --version "$VERSION" --https
+      - name: Windows native runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archive = (Get-ChildItem release-artifact/*.zip).FullName
+          python tools/check_release.py "$archive" --version "$env:VERSION" --https
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
   publish:
     name: publish the release
-    needs: [linux, macos, windows]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [verify]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -146,12 +245,14 @@ jobs:
       - uses: actions/download-artifact@v7
         with:
           path: assets
+          pattern: chesstty-*
           merge-multiple: true
 
       - name: Checksums
         run: |
           set -euo pipefail
           cd assets
+          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 4
           sha256sum -- * > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
@@ -168,5 +269,5 @@ jobs:
             flags=(--generate-notes)
             case "$TAG" in *-*) flags+=(--prerelease) ;; esac
             gh release create "$TAG" assets/* \
-              --title "ChessTUI ${TAG#v}" "${flags[@]}"
+              --title "ChessTTY ${TAG#v}" "${flags[@]}"
           fi

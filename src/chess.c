@@ -2,6 +2,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "chess.h"
 #include <ctype.h>
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -15,6 +16,7 @@ void pos_start(Pos *p) {
 }
 
 bool pos_from_fen(Pos *p, const char *fen) {
+    if (!fen) return false;
     Pos t;
     memset(&t, 0, sizeof t);
     t.ep = -1;
@@ -22,7 +24,7 @@ bool pos_from_fen(Pos *p, const char *fen) {
     int f = 0, r = 7;
     while (*s && *s != ' ') {
         char c = *s++;
-        if (c == '/') { r--; f = 0; if (r < 0) return false; continue; }
+        if (c == '/') { if (f != 8 || r == 0) return false; r--; f = 0; continue; }
         if (c >= '1' && c <= '8') { f += c - '0'; if (f > 8) return false; continue; }
         if (f > 7) return false;
         int8_t pc;
@@ -35,35 +37,62 @@ bool pos_from_fen(Pos *p, const char *fen) {
         t.sq[SQ(f, r)] = isupper((unsigned char)c) ? pc : (int8_t)-pc;
         f++;
     }
+    if (r != 0 || f != 8 || *s != ' ') return false;
     while (*s == ' ') s++;
     if (*s == 'w') t.stm = 1; else if (*s == 'b') t.stm = -1; else return false;
     s++;
+    if (*s != ' ') return false;
     while (*s == ' ') s++;
     if (*s == '-') { s++; }
     else {
+        if (!*s) return false;
         while (*s && *s != ' ') {
             switch (*s) {
                 case 'K': t.castle |= CR_WK; break; case 'Q': t.castle |= CR_WQ; break;
                 case 'k': t.castle |= CR_BK; break; case 'q': t.castle |= CR_BQ; break;
-                default: break; /* ignore Chess960-style letters */
+                default: return false; /* only standard chess is supported */
             }
             s++;
         }
     }
+    if (*s != ' ') return false;
     while (*s == ' ') s++;
     if (*s == '-') s++;
     else if (*s >= 'a' && *s <= 'h' && s[1] >= '1' && s[1] <= '8') {
         t.ep = SQ(s[0] - 'a', s[1] - '1');
         s += 2;
     }
+    else return false;
+    if (*s && *s != ' ') return false;
     while (*s == ' ') s++;
-    int hm = 0, fm = 1;
-    if (sscanf(s, "%d %d", &hm, &fm) < 1) { hm = 0; fm = 1; }
-    if (fm < 1) fm = 1;
-    t.halfmove = (int16_t)hm;
-    t.fullmove = (int16_t)fm;
-    /* minimal sanity: both kings on the board */
-    if (king_square(&t, 1) < 0 || king_square(&t, -1) < 0) return false;
+    /* Four-field FENs are useful for pasted positions; clocks are optional. */
+    int clocks[2] = {0, 1};
+    for (int i = 0; i < 2 && *s; i++) {
+        if (!isdigit((unsigned char)*s)) return false;
+        int value = 0;
+        while (isdigit((unsigned char)*s)) {
+            int digit = *s++ - '0';
+            if (value > (INT16_MAX - digit) / 10) return false;
+            value = value * 10 + digit;
+        }
+        clocks[i] = value;
+        if (*s && *s != ' ') return false;
+        while (*s == ' ') s++;
+    }
+    if (*s || clocks[1] < 1) return false;
+    t.halfmove = (int16_t)clocks[0];
+    t.fullmove = (int16_t)clocks[1];
+    int white_kings = 0, black_kings = 0;
+    for (int i = 0; i < 64; i++) {
+        white_kings += t.sq[i] == KING;
+        black_kings += t.sq[i] == -KING;
+        if ((RANK_OF(i) == 0 || RANK_OF(i) == 7) &&
+            (t.sq[i] == PAWN || t.sq[i] == -PAWN)) return false;
+    }
+    if (white_kings != 1 || black_kings != 1 || in_check(&t, -t.stm)) return false;
+    if (t.ep >= 0 && (RANK_OF(t.ep) != (t.stm > 0 ? 5 : 2) ||
+        t.sq[t.ep] != EMPTY || t.sq[t.ep - 8 * t.stm] != -PAWN * t.stm))
+        return false;
     *p = t;
     return true;
 }
@@ -257,10 +286,12 @@ int gen_legal(const Pos *p, Move *out) {
     Move tmp[MAX_MOVES];
     int n = gen_pseudo(p, tmp);
     int m = 0;
+    int king = king_square(p, p->stm);
     for (int i = 0; i < n; i++) {
         Pos t = *p;
         make_move(&t, tmp[i]);
-        if (!in_check(&t, p->stm)) out[m++] = tmp[i];
+        int target = tmp[i].from == king ? tmp[i].to : king;
+        if (target >= 0 && !square_attacked(&t, target, -p->stm)) out[m++] = tmp[i];
     }
     return m;
 }
@@ -299,8 +330,8 @@ void make_move(Pos *p, Move m) {
     p->ep = -1;
     if (is_pawn && m.to - m.from == 16 * side) p->ep = (int8_t)(m.from + 8 * side);
 
-    if (is_pawn || is_cap) p->halfmove = 0; else p->halfmove++;
-    if (side < 0) p->fullmove++;
+    if (is_pawn || is_cap) p->halfmove = 0; else if (p->halfmove < INT16_MAX) p->halfmove++;
+    if (side < 0 && p->fullmove < INT16_MAX) p->fullmove++;
     p->stm = (int8_t)-side;
 }
 
@@ -313,7 +344,7 @@ void move_to_uci(Move m, char *out) {
     else out[4] = 0;
 }
 
-bool uci_to_move(const Pos *p, const char *s, Move *out) {
+static bool parse_uci(const char *s, Move *out) {
     size_t len = strlen(s);
     if (len < 4 || len > 5) return false;
     if (s[0] < 'a' || s[0] > 'h' || s[1] < '1' || s[1] > '8' ||
@@ -327,10 +358,17 @@ bool uci_to_move(const Pos *p, const char *s, Move *out) {
             default: return false;
         }
     }
+    *out = (Move){(uint8_t)from, (uint8_t)to, (int8_t)promo};
+    return true;
+}
+
+bool uci_to_move(const Pos *p, const char *s, Move *out) {
+    Move wanted;
+    if (!parse_uci(s, &wanted)) return false;
     Move list[MAX_MOVES];
     int n = gen_legal(p, list);
     for (int i = 0; i < n; i++)
-        if (list[i].from == from && list[i].to == to && list[i].promo == promo) {
+        if (list[i].from == wanted.from && list[i].to == wanted.to && list[i].promo == wanted.promo) {
             *out = list[i];
             return true;
         }
@@ -418,7 +456,15 @@ bool san_to_move(const Pos *p, const char *san, Move *out) {
     }
 
     /* try UCI notation first (e2e4, e7e8q) */
-    if (uci_to_move(p, s, out)) return true;
+    Move wanted;
+    if (parse_uci(s, &wanted)) {
+        for (int i = 0; i < nl; i++)
+            if (list[i].from == wanted.from && list[i].to == wanted.to && list[i].promo == wanted.promo) {
+                *out = list[i];
+                return true;
+            }
+        return false;
+    }
 
     int promo = 0;
     if (n >= 2 && s[n-2] == '=') {
@@ -513,8 +559,12 @@ void pos_key(const Pos *p, PosKey *out) {
         if (r >= 0 && r <= 7) {
             for (int df = -1; df <= 1; df += 2) {
                 int f = FILE_OF(p->ep) + df;
-                if (f >= 0 && f <= 7 && p->sq[SQ(f, r)] == (int8_t)(PAWN * p->stm))
-                    ep = (uint8_t)p->ep;
+                if (f >= 0 && f <= 7 && p->sq[SQ(f, r)] == (int8_t)(PAWN * p->stm) &&
+                    p->sq[p->ep] == EMPTY && p->sq[p->ep - 8 * p->stm] == -PAWN * p->stm) {
+                    Pos after = *p;
+                    make_move(&after, (Move){(uint8_t)SQ(f, r), (uint8_t)p->ep, 0});
+                    if (!in_check(&after, p->stm)) { ep = (uint8_t)p->ep; break; }
+                }
             }
         }
     }

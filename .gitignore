@@ -1,10 +1,25 @@
 *.o
-chesstui
-chesstui.exe
+chesstty
+chesstty.exe
 engine/
 third_party/
 game_*.pgn
 
+# games database (binary index sidecar + test scratch)
+*.ctdb
+.dbtest/
+
 # release packaging
 dist/
 .version
+
+/regression-test
+/regression-test.exe
+/.regression-test/
+
+/online-test
+/online-test.exe
+/.online-test/
+
+# Python test/tool caches
+__pycache__/

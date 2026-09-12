@@ -12,16 +12,23 @@ static bool g_truecolor = false;
 static bool g_inited = false;
 
 /* ------------------------------ string builder ------------------------------ */
-static void sb_grow(SB *b, size_t need) {
-    if (b->len + need + 1 <= b->cap) return;
+static bool sb_grow(SB *b, size_t need) {
+    if (need > SIZE_MAX - b->len - 1) return false;
+    if (b->len + need + 1 <= b->cap) return true;
     size_t nc = b->cap ? b->cap * 2 : 8192;
-    while (nc < b->len + need + 1) nc *= 2;
-    b->s = realloc(b->s, nc);
+    while (nc < b->len + need + 1) {
+        if (nc > SIZE_MAX / 2) { nc = b->len + need + 1; break; }
+        nc *= 2;
+    }
+    char *grown = realloc(b->s, nc);
+    if (!grown) return false;
+    b->s = grown;
     b->cap = nc;
+    return true;
 }
 void sb_reset(SB *b) { b->len = 0; if (b->s) b->s[0] = 0; }
 void sb_putn(SB *b, const char *s, size_t n) {
-    sb_grow(b, n);
+    if (!sb_grow(b, n)) return;
     memcpy(b->s + b->len, s, n);
     b->len += n;
     b->s[b->len] = 0;
@@ -161,6 +168,7 @@ Key term_read_key(void) {
     if (c == 8) { k.type = K_BACKSPACE; return k; }
     if (c == 27) { k.type = K_ESC; return k; }
     if (c == '\t') { k.type = K_TAB; return k; }
+    if (c >= 1 && c <= 26) { k.type = K_CTRL; k.ch = (char)('a' + c - 1); return k; }
     if (c >= 32 && c < 127) { k.type = K_CHAR; k.ch = (char)c; return k; }
     return k;
 }
@@ -256,6 +264,7 @@ Key term_read_key(void) {
         if (c0 == '\r' || c0 == '\n') { k.type = K_ENTER; return k; }
         if (c0 == 127 || c0 == 8) { k.type = K_BACKSPACE; return k; }
         if (c0 == '\t') { k.type = K_TAB; return k; }
+        if (c0 >= 1 && c0 <= 26) { k.type = K_CTRL; k.ch = (char)('a' + c0 - 1); return k; }
         if (c0 >= 32 && c0 < 127) { k.type = K_CHAR; k.ch = (char)c0; return k; }
         return k; /* UTF-8 or control byte: ignore */
     }

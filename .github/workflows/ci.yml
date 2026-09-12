@@ -36,14 +36,27 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: HTTPS development libraries (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev libssl-dev
+
       - name: Build (warnings are errors)
         run: make tui CC=${{ matrix.cc }} CFLAGS="${{ matrix.cflags }}"
 
+      - name: Prefix keybindings (pseudo-terminal)
+        run: make test-keybindings
+
+      - name: Regression tests
+        run: make test-regression test-online CFLAGS="-O2 -Werror"
+
       - name: Move generator self-test
-        run: ./chesstui --perft
+        run: ./chesstty --perft
 
       - name: PGN parser self-test
-        run: ./chesstui --pgn-test examples/immortal-games.pgn
+        run: ./chesstty --pgn-test examples/immortal-games.pgn
+
+      - name: Opening tree and recognition self-test
+        run: ./chesstty --openings-test
 
   # Same, on the Windows side of the #ifdefs.
   windows:
@@ -60,16 +73,22 @@ jobs:
           msystem: UCRT64
           update: true
           install: make
-          pacboy: gcc:p
+          pacboy: gcc:p curl-winssl:p pkgconf:p
 
       - name: Build (warnings are errors)
         run: make tui CFLAGS="-O2 -Werror"
 
+      - name: Regression tests
+        run: make test-regression test-online CFLAGS="-O2 -Werror"
+
       - name: Move generator self-test
-        run: ./chesstui.exe --perft
+        run: ./chesstty.exe --perft
 
       - name: PGN parser self-test
-        run: ./chesstui.exe --pgn-test examples/immortal-games.pgn
+        run: ./chesstty.exe --pgn-test examples/immortal-games.pgn
+
+      - name: Opening tree and recognition self-test
+        run: ./chesstty.exe --openings-test
 
   # Slow lane: the whole thing, including building Stockfish and talking to it.
   engine:
@@ -77,6 +96,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+
+      - name: HTTPS development libraries (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev libssl-dev
 
       - name: Cache the built engine
         uses: actions/cache@v6

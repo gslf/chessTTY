@@ -27,7 +27,7 @@ void engine_send(Engine *e, const char *fmt, ...) {
     char buf[8192];
     va_list ap;
     va_start(ap, fmt);
-    int n = vsnprintf(buf, sizeof buf - 2, fmt, ap);
+    int n = vsnprintf(buf, sizeof buf - 1, fmt, ap);
     va_end(ap);
     if (n < 0) return;
     if (n > (int)sizeof buf - 2) n = (int)sizeof buf - 2;
@@ -37,6 +37,7 @@ void engine_send(Engine *e, const char *fmt, ...) {
 }
 
 bool engine_poll_line(Engine *e, char *out, size_t n) {
+    if (!n) return false;
     for (;;) {
         /* is a complete line already buffered? */
         for (int i = 0; i < e->rlen; i++) {
