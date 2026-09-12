@@ -1,4 +1,4 @@
-# ♞ ChessTTY
+# ♘ chessTTY
 
 ![ChessTTY Screenshot](res/ss.png)
 
