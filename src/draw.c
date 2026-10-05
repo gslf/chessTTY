@@ -721,6 +721,11 @@ static void draw_game(App *a, int *cur_r, int *cur_c) {
 }
 
 /* ------------------------------ menu ------------------------------ */
+static int menu_row(int item) {
+    /* Separate the play modes and the quit action with blank rows. */
+    return item + (item >= MI_LOCAL) + (item >= MI_ONLINE) + (item >= MI_QUIT);
+}
+
 static void draw_menu(App *a, int *cur_r, int *cur_c) {
     SB *b = &a->fb;
     const int MW = 68;                       /* menu block width */
@@ -760,12 +765,22 @@ static void draw_menu(App *a, int *cur_r, int *cur_c) {
     if (hint_w < 30) hint_w = 0;
 
     int visible = a->th - r - 7;
+    if (visible < 1) visible = 1;
     if (a->menu_item < a->menu_scroll) a->menu_scroll = a->menu_item;
-    if (a->menu_item >= a->menu_scroll + visible) a->menu_scroll = a->menu_item - visible + 1;
-    if (a->menu_scroll > MI_COUNT - visible) a->menu_scroll = MI_COUNT - visible;
-    if (a->menu_scroll < 0) a->menu_scroll = 0;
-    for (int i = a->menu_scroll; i < MI_COUNT && i < a->menu_scroll + visible; i++) {
-        int row = r + i - a->menu_scroll;
+    while (menu_row(a->menu_item) - menu_row(a->menu_scroll) >= visible)
+        a->menu_scroll++;
+    while (a->menu_scroll > 0 &&
+           menu_row(MI_COUNT - 1) - menu_row(a->menu_scroll - 1) < visible)
+        a->menu_scroll--;
+    for (int row = r; row < r + visible; row++) {
+        t_moveto(b, row, cx);
+        t_reset(b);
+        put_padded(b, "", avail);
+    }
+    for (int i = a->menu_scroll; i < MI_COUNT; i++) {
+        int offset = menu_row(i) - menu_row(a->menu_scroll);
+        if (offset >= visible) break;
+        int row = r + offset;
         t_moveto(b, row, cx);
         bool sel = a->menu_item == i && a->prompt == PROMPT_NONE;
         t_style_fg(b, sel ? CL_ACC : CL_TXT, sel ? A_BOLD : 0);
